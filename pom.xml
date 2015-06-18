@@ -46,8 +46,8 @@
 
         <dependency>
             <groupId>org.zeromq</groupId>
-            <artifactId>jzmq</artifactId>
-            <version>3.1.0</version>
+            <artifactId>jeromq</artifactId>
+            <version>0.3.4</version>
         </dependency>
 
         <dependency>

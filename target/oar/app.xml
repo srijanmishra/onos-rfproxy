@@ -14,7 +14,7 @@
   ~ See the License for the specific language governing permissions and
   ~ limitations under the License.
   -->
-<app name="org.routeflow.rfproxy" origin="RouteFlow" version="1.0-SNAPSHOT"
+<app name="org.routeflow.onos-rfproxy" origin="RouteFlow" version="1.0-SNAPSHOT"
         featuresRepo="mvn:org.routeflow/onos-rfproxy/1.0-SNAPSHOT/xml/features"
         features="onos-rfproxy">
     <description>ONOS OSGi bundle archetype</description>
