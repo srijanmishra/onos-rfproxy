@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?><components xmlns:scr="http://www.osgi.org/xmlns/scr/v1.1.0">
+    <scr:component immediate="true" name="org.routeflow.rfproxy.hwclient" activate="activate">
+        <implementation class="org.routeflow.rfproxy.hwclient"/>
+        <property name="service.pid" value="org.routeflow.rfproxy.hwclient"/>
+    </scr:component>
+</components>
