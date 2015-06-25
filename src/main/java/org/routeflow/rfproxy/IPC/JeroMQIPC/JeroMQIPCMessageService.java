@@ -86,7 +86,7 @@ public class JeroMQIPCMessageService extends IPCMessageService implements fields
 		/** Creates and run a new thread for capture new messages */
 		Thread thread = new Thread("subWorker") {
 			public void run() {
-				//subWorker(channelId, factory, processor);
+				subWorker(channelId, factory, processor);
 			}
 		};
 
@@ -157,7 +157,7 @@ public class JeroMQIPCMessageService extends IPCMessageService implements fields
 		Socket publisher = this.ctx.socket(ZMQ.PUB);
 		publisher.bind(INTERNAL_PUBLISH_CHANNEL);
 
-		ready.unlock();
+		this.ready.unlock();
 
 		Poller poller = new Poller(2);
 		poller.register(external, Poller.POLLIN);
@@ -191,7 +191,28 @@ public class JeroMQIPCMessageService extends IPCMessageService implements fields
 
 			}
 		}
+	}
 
+	public void subWorker(final String channelId, final IPCMessageFactory factory,
+			final IPCMessageProcessor processor) {
+		this.ready.unlock();
+
+		Socket subscriber = this.ctx.socket(ZMQ.SUB);
+		subscriber.subscribe(channelId.getBytes());
+		subscriber.connect(INTERNAL_PUBLISH_CHANNEL);
+
+		while(true) {
+			String address = subscriber.recvStr();
+			String channel = subscriber.recvStr();
+			String type = subscriber.recvStr();
+			String payload = subscriber.recvStr();
+			if (type.length() == 1) {
+				IPCMessage msg = factory.buildForType(Integer.parseInt(type));
+				msg.from_bson(payload);
+
+				processor.process(address, this.id, channelId, msg);
+			}
+		}
 	}
 
 	public String get_id() {
