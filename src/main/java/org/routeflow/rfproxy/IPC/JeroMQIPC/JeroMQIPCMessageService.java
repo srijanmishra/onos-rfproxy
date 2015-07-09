@@ -16,6 +16,10 @@ import org.zeromq.ZMQ.Socket;
 import org.zeromq.ZMQ.PollItem;
 import org.zeromq.ZMQ.Poller;
 
+import com.mongodb.BasicDBObject;
+import com.mongodb.DBObject;
+import com.mongodb.util.JSON;
+
 import org.slf4j.Logger;
 
 public class JeroMQIPCMessageService extends IPCMessageService implements fields {
@@ -119,7 +123,8 @@ public class JeroMQIPCMessageService extends IPCMessageService implements fields
 
 		String type = String.valueOf(msg.get_type());
 
-		String payload = msg.to_bson();
+		DBObject json = msg.to_bson();
+		String payload = json.toString();
 
 		this.sender.send(to, ZMQ.SNDMORE);
         this.sender.send(channelId, ZMQ.SNDMORE);
@@ -208,7 +213,7 @@ public class JeroMQIPCMessageService extends IPCMessageService implements fields
 			String payload = subscriber.recvStr();
 			if (type.length() == 1) {
 				IPCMessage msg = factory.buildForType(Integer.parseInt(type));
-				msg.from_bson(payload);
+				msg.from_bson((DBObject)JSON.parse(payload));
 
 				processor.process(address, this.id, channelId, msg);
 			}
