@@ -11,6 +11,9 @@ import java.nio.ByteOrder;
 
 import java.io.*;
 
+import org.onosproject.net.PortNumber;
+import org.onosproject.net.flowobjective.ForwardingObjective;
+import org.onosproject.net.packet.*;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessage;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessageProcessor;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessageService;
@@ -20,17 +23,25 @@ import org.routeflow.rfproxy.RFProtocol.*;
 
 import org.onosproject.net.device.DeviceListener;
 import org.onosproject.net.device.DeviceService;
-
 import org.onosproject.net.DeviceId;
 
-import org.onosproject.net.packet.PacketContext;
-import org.onosproject.net.packet.PacketPriority;
-import org.onosproject.net.packet.PacketProcessor;
-import org.onosproject.net.packet.PacketService;
+import org.onosproject.core.CoreService;
+import org.onosproject.cfg.ComponentConfigService;
+import org.onosproject.core.ApplicationId;
+
 import org.onosproject.net.flow.*;
+
+import org.openflow.protocol.factory.BasicFactory;
+import org.openflow.protocol.action.OFAction;
+import org.openflow.protocol.action.OFActionOutput;
+import org.openflow.protocol.OFPacketOut;
+import org.openflow.protocol.OFMatch;
+import org.openflow.protocol.OFType;
 
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
+import org.apache.felix.scr.annotations.Reference;
+import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.Deactivate;
 import org.apache.felix.scr.annotations.Service;
 import org.slf4j.Logger;
@@ -38,7 +49,7 @@ import org.slf4j.LoggerFactory;
 
 @Component(immediate = true)
 /* Main Class. */
-public class RFProxy implements DeviceListener { //TODO:handle packet processor
+public class RFProxy {
 	/* Log Service. */
 	protected static Logger logger = LoggerFactory.getLogger(RFProxy.class);
 
@@ -56,11 +67,11 @@ public class RFProxy implements DeviceListener { //TODO:handle packet processor
 	private BasicFactory basicFactory;
 	private ApplicationId appId;
 	/* SAL modules, required for listening to packets, manage switches and program (install/remove) flows */
-	 @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
     protected CoreService coreService;
 
 	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-	private PacketService dataPacketService;
+	protected PacketService packetService;
 
 	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
 	private DeviceService switchMgr;
@@ -76,12 +87,12 @@ public class RFProxy implements DeviceListener { //TODO:handle packet processor
         cfgService.registerProperties(RFProxy.class);
         appId = coreService.registerApplication("org.routeflow.onos-rfproxy");
 
-        packetService.addProcessor(processor, PacketProcessor.ADVISOR_MAX + 2);
+        //packetService.addProcessor(processor, PacketProcessor.ADVISOR_MAX + 2);
         //readComponentConfiguration(context);
-        requestPackests();
+        //requestPackests();
         start();
 
-        log.info("Started with Application ID {}", appId.id());
+        logger.info("Started with Application ID {}", appId.id());
     }
 
 	/**
@@ -98,6 +109,9 @@ public class RFProxy implements DeviceListener { //TODO:handle packet processor
     		return ;
     	}
 
+		int priority = 1;
+		int makeTemp = 0;
+
     	//this.logger.info("Processing flow mod");
     	/* Create flow and set default options.
     	 	This is done to avoid additional checks for existing options*/
@@ -106,58 +120,47 @@ public class RFProxy implements DeviceListener { //TODO:handle packet processor
         //flow.setPriority((short) 1); //DEFAULT_IPSWITCH_PRIORITY
         //flow.setIdleTimeout((short) 0);
 
-        DefaultFlowRule.Builder flowBuilder = DefaultFlowRule.Builder()
-                .withSelector(msg.get_matches())
-                .withTreatment(msg.get_actions())
-                .withPriority(1)
-                .withFlag(ForwardingObjective.Flag.VERSATILE)
-                .fromApp(appId)
-                .makeTemporary(0);
-
         // Override the predefined options for the packet options
 		for(Option o : msg.get_options()){
-			if(o.get_type() == OptionType.RFOT_PRIORITY)
-				flowBuilder.withPriority(o.get_value());
-	        else if (o.get_type() == OptionType.RFOT_IDLE_TIMEOUT)
-	            flowBuilder.makeTemporary(o.get_value());
-	        else if(o.get_type() == OptionType.RFOT_HARD_TIMEOUT)
-	            flow.setHardTimeout(o.get_value());//#TODO, look for necessary function
+			if(o.get_type() == OptionType.RFOT_PRIORITY) {
+				priority = o.get_value();
+			}
+	        else if (o.get_type() == OptionType.RFOT_IDLE_TIMEOUT) {
+				makeTemp = o.get_value();
+			}
+	        else if(o.get_type() == OptionType.RFOT_HARD_TIMEOUT) {
+				makeTemp = o.get_value();
+			}
 		}
-
-		FlowRule flowRule = flowBuilder.build();
 
 		// create the node to implement the flow in
     	//Node node = NodeCreator.createOFNode(msg.get_id());
 
-    	DeviceId node = DeviceId.deviceId(msg.get_id());
+    	DeviceId node = DeviceId.deviceId(String.valueOf(msg.get_id()));
 
- 		// status of the operation
-    	Status status;
-    	
-    	if(msg.get_mod() == 0) { // RouteMod ADD
+		FlowRule flowRule = DefaultFlowRule.builder()
+				.forDevice(node)
+				.withSelector(msg.get_matches())
+				.withTreatment(msg.get_actions())
+				.withPriority(priority)
+				.withFlag(ForwardingObjective.Flag.VERSATILE)
+				.fromApp(appId)
+				.makeTemporary(makeTemp)
+				.build();
+
+		if(msg.get_mod() == 0) { // RouteMod ADD
     		// add the flow
-    		//this.logger.info("Adding flow");
-    		
-			//status = this.programmer.addFlow(node, flow);
-			status = flowBuilder.forDevice(node);
-			FlowRule flowRule = flowBuilder.build();			
+    		this.logger.info("Adding flow");
 
-			// process the status
-			if (status.isSuccess())
-    			this.logger.info("Installed {} in node id {}, node {}", flowRule, msg.get_id(), node);
-    		else
-    			this.logger.info("Error installing flow ({})", status.getDescription());
+			this.programmer.applyFlowRules(flowRule);
 
+			this.logger.info("Installed {} in node id {}, node {}", flowRule, msg.get_id(), node);
 		}
     	else if(msg.get_mod() == 1){ // RouteMod DEL
     		// remove the flow
-    		status = this.programmer.removeFlowRules(flowRule);
+    		this.programmer.removeFlowRules(flowRule);
     		
-    		// process the status
-    		if(status.isSuccess())
-    			this.logger.info("Removed {} in node {}", flow, node);
-    		else
-    			this.logger.info("Error removing flow ({})", status.getDescription());
+    		this.logger.info("Removed {} in node {}", flow, node);
 		}    		    			
     }
 
@@ -167,32 +170,24 @@ public class RFProxy implements DeviceListener { //TODO:handle packet processor
      * @param port the port of the switch to send the message to
      * @param inPkt the packet with data to send
      */
-	private void send_packet(Long sw_id, short port, RawPacket inPkt) {
+	private void send_packet(Long sw_id, short port, InboundPacket inPkt) {
 		OFPacketOut packetOut = (OFPacketOut) this.basicFactory.getMessage(OFType.PACKET_OUT);
 		
 		// Set Output action so that packets are forwarded to the specified port
-		List<OFAction> actions = new ArrayList<OFAction>(1);
-		actions.add((new OFActionOutput()).setPort(port));
-		packetOut.setActions(actions);
+		TrafficTreatment.Builder actions = DefaultTrafficTreatment.builder();
+		actions.setOutput(PortNumber.portNumber((long) port));
 
 		// Build the packet to send using data from the received inPkt
-		byte[] packetData = inPkt.getPacketData();
-		packetOut.setPacketData(packetData);
+		ByteBuffer packetData = inPkt.unparsed();
+		packetOut.setPacketData(packetData.array());
 		 
 		packetOut.setBufferId(OFPacketOut.BUFFER_ID_NONE);
 
 		// Sending data to nodes
-		NodeConnector nc = NodeConnectorCreator.createOFNodeConnector(port, NodeCreator.createOFNode(sw_id));
-	    
-		try{
-		    RawPacket toSend = new RawPacket(inPkt.getPacketData());
-		    toSend.setOutgoingNodeConnector(nc);
+		DeviceId node = DeviceId.deviceId(String.valueOf(sw_id));
 
-		    dataPacketService.transmitDataPacket(toSend);
-		}
-		catch(ConstructionException e){
-			logger.error("Construction exception: {} ", e.getMessage());
-		}
+		DefaultOutboundPacket toSend = new DefaultOutboundPacket(node, actions.build(), packetData);
+		packetService.emit(toSend);
 		
 	}
 
