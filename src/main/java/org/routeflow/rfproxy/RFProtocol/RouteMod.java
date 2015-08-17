@@ -6,8 +6,6 @@ import org.routeflow.rfproxy.IPC.Tools.messagesTypes;
 import org.routeflow.rfproxy.IPC.Tools.Option;
 import org.routeflow.rfproxy.IPC.Tools.OptionType;
 
-import org.onosproject.net.flow.criteria.Criterion;
-import org.onosproject.net.flow.criteria.Criterion.Type;
 import org.onosproject.net.flow.criteria.*;
 import org.onosproject.net.PortNumber;
 import org.onlab.packet.IpPrefix;
@@ -31,13 +29,13 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
     private int mod;
     private long id;
     private TrafficTreatment.Builder actions;
-    private Criterion match;
+    private TrafficSelector match;
     private List<Option> options;
 
     public RouteMod(){}
 
     public RouteMod(int m, long mod_id, TrafficTreatment.Builder acts, 
-                            Criterion mtchs, List<Option> opts){
+                            DefaultTrafficSelector mtchs, List<Option> opts){
         this.set_mod(m);
         this.set_id(mod_id);
         this.set_actions(acts);
@@ -69,11 +67,11 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
         this.actions = acts;
     }
 
-    public Criterion get_matches(){
+    public TrafficSelector get_matches(){
         return this.match;
     }
 
-    public void set_matches(Criterion mtchs){
+    public void set_matches(DefaultTrafficSelector mtchs){
         this.match = mtchs;
     }
 
@@ -102,7 +100,7 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
 
         this.actions = DefaultTrafficTreatment.builder();
         this.options = new ArrayList<Option>();
-        this.match = Criteria.dummy();
+        this.match = DefaultTrafficSelector.emptySelector();
 
         this.set_mod(Integer.parseInt(content.get("mod").toString()));
         this.set_id(Long.parseLong(content.get("id").toString()));
@@ -139,13 +137,11 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
             for(int j=0; j < 4; j++)
                 mask[j] = value[j+4];
 
-            try{
-                IpPrefix address = IpPrefix.valueOf(IpAddress.Version.INET, ipvalue, IpPrefix.MAX_INET_MASK_LENGTH);
-                this.match = Criteria.matchIPDst(address);
-            }
-            catch(UnknownHostException e){
+            IpPrefix address = IpPrefix.valueOf(IpAddress.Version.INET, ipvalue, IpPrefix.MAX_INET_MASK_LENGTH);
 
-            }
+            this.match = DefaultTrafficSelector.builder()
+                    .matchIPDst(address)
+                    .build();
         }
         else if (type == 2){ //Match IPv6 Destination
             byte[] value = (byte[]) o.get("value");
@@ -154,17 +150,16 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
             for(int i=0; i < 16; i++)
                 ipvalue[i] = value[i];
 
-            try{
                 IpPrefix address = IpPrefix.valueOf(IpAddress.Version.INET6, ipvalue, IpPrefix.MAX_INET6_MASK_LENGTH);
-                this.match = Criteria.matchIPDst(address);
-            }
-            catch(UnknownHostException e){
-
-            }
+                this.match = DefaultTrafficSelector.builder()
+                        .matchIPDst(address)
+                        .build();
         }
         else if (type == 3){ //Match Ethernet Destination
             byte[] value = (byte[]) o.get("value");
-            this.match = Criteria.matchEthDst(MacAddress.valueOf(value));
+            this.match = DefaultTrafficSelector.builder()
+                    .matchEthDst(MacAddress.valueOf(value))
+                    .build();
         /*else if (type == 4){ //Match MPLS label_in
             this.match.setField(MatchType.
         }*/
@@ -172,7 +167,9 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
         else if (type == 5){ //Match Ethernet type
             short val = new BigInteger(((byte[]) o.get("value"))).shortValue();
 
-            this.match = Criteria.matchEthType((int) val);
+            this.match = DefaultTrafficSelector.builder()
+                    .matchEthType(val)
+                    .build();
         }
         /*else if (type == 6){ //Match Network Protocol
         //    this.match.setField(MatchType.NW_PROTO, ((byte[]) o.get("value"))[0]);
@@ -180,18 +177,24 @@ public class RouteMod extends IPCMessage implements fields, messagesTypes {
         else if (type == 7){ //Match Transport Layer Src Port
             short val = new BigInteger(((byte[]) o.get("value"))).shortValue();
 
-            this.match = Criteria.matchTcpSrc(val);
+            this.match = DefaultTrafficSelector.builder()
+                    .matchTcpSrc(val)
+                    .build();
         }
         else if (type == 8){ //Match Transport Layer Dest Port
             short port = new BigInteger(((byte[]) o.get("value"))).shortValue();
 
-            this.match = Criteria.matchTcpDst(port);
+            this.match = DefaultTrafficSelector.builder()
+                    .matchTcpDst(port)
+                    .build();
         }
         else if(type == 254){ //Match incoming port      
             short port = new BigInteger(((byte[]) o.get("value"))).shortValue();
 
             PortNumber nc = PortNumber.portNumber(port);
-            this.match = Criteria.matchInPort(nc);
+            this.match = DefaultTrafficSelector.builder()
+                    .matchInPort(nc)
+                    .build();
         }
     }
 

@@ -11,9 +11,6 @@ import java.nio.ByteOrder;
 
 import java.io.*;
 
-import org.onosproject.net.PortNumber;
-import org.onosproject.net.flowobjective.ForwardingObjective;
-import org.onosproject.net.packet.*;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessage;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessageProcessor;
 import org.routeflow.rfproxy.IPC.IPC.IPCMessageService;
@@ -28,8 +25,13 @@ import org.onosproject.net.DeviceId;
 import org.onosproject.core.CoreService;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
-
+import org.onosproject.net.PortNumber;
+import org.onosproject.net.flowobjective.ForwardingObjective;
+import org.onosproject.net.packet.*;
 import org.onosproject.net.flow.*;
+import org.onlab.packet.Ethernet;
+import org.onosproject.net.ConnectPoint;
+import org.onosproject.net.device.DeviceEvent;
 
 import org.openflow.protocol.factory.BasicFactory;
 import org.openflow.protocol.action.OFAction;
@@ -51,7 +53,7 @@ import org.slf4j.LoggerFactory;
 /* Main Class. */
 public class RFProxy {
 	/* Log Service. */
-	protected static Logger logger = LoggerFactory.getLogger(RFProxy.class);
+	protected Logger logger = LoggerFactory.getLogger(RFProxy.class);
 
 	/* Association Table. */
 	AssociationTable table = new AssociationTable();
@@ -141,9 +143,8 @@ public class RFProxy {
 		FlowRule flowRule = DefaultFlowRule.builder()
 				.forDevice(node)
 				.withSelector(msg.get_matches())
-				.withTreatment(msg.get_actions())
+				.withTreatment(msg.get_actions().build())
 				.withPriority(priority)
-				.withFlag(ForwardingObjective.Flag.VERSATILE)
 				.fromApp(appId)
 				.makeTemporary(makeTemp)
 				.build();
@@ -160,7 +161,7 @@ public class RFProxy {
     		// remove the flow
     		this.programmer.removeFlowRules(flowRule);
     		
-    		this.logger.info("Removed {} in node {}", flow, node);
+    		this.logger.info("Removed {} in node {}", flowRule, node);
 		}    		    			
     }
 
@@ -203,14 +204,12 @@ public class RFProxy {
      * RouteFlow does not require datapathUp events
      * @param node that connected or disconnected
      * @param type the type of the Update
-     * @param propMap a map with the properties of the node
      */
-    public void notifyNode(DeviceId node, UpdateType type,
-            Map<String, Property> propMap){
+    public void notifyNode(DeviceId node, DeviceEvent.Type type) {
 
-    		if(type == UpdateType.REMOVED){
+    		if(type == DeviceEvent.Type.DEVICE_REMOVED){
     			// Get id of the datapath
-				long dp_id = (long) node.toString(); // Get dp id
+				long dp_id = Integer.parseInt(node.toString()); // Get dp id
 
     			// Delete from the association table
 				this.table.delete_dp(dp_id);
@@ -232,15 +231,14 @@ public class RFProxy {
      * RouteFlow does not require datapathPortDown events
      * @param nodeConnector the connector that identifies the port and switch
      * @param type the type of the Update
-     * @param propMap a map with the properties of the nodeConnector
      */
-    public void notifyNodeConnector(NodeConnector nodeConnector,
-            UpdateType type, Map<String, Property> propMap){
+    public void notifyNodeConnector(ConnectPoint nodeConnector,
+            DeviceEvent.Type type){
 
-			if(type == UpdateType.ADDED){
+		if (type == DeviceEvent.Type.DEVICE_ADDED){
 				// Get the port and id of the switch
-				long dp_id = (long) nodeConnector.getNode().getID(); // Get dp id
-				short port = Short.parseShort(nodeConnector.getID().toString());
+			long dp_id = Integer.parseInt(nodeConnector.deviceId().toString()); // Get dp id
+				short port = Short.parseShort(nodeConnector.port().toString());
 
 				if (port > 0) {
 
@@ -265,29 +263,26 @@ public class RFProxy {
      * @param inPkt the received packet
      * @return if the packet will be ignored or consumed
      */
-	public PacketResult receiveDataPacket(RawPacket inPkt){
-		NodeConnector in = inPkt.getIncomingNodeConnector();
+	public boolean receiveDataPacket(InboundPacket inPkt){
+		ConnectPoint in = inPkt.receivedFrom();
 
 		// Get ethernet type using the match
 		OFMatch match = new OFMatch();
-		match.loadFromPacket(inPkt.getPacketData(), 
-			(short) Integer.parseInt(in.getID().toString()));
+		match.loadFromPacket(inPkt.unparsed().array(),
+			(short) Integer.parseInt(in.port().toString()));
 		Short ethernetType = match.getDataLayerType();
 
 		// If packet is of type LLDP or has a type lower than 0, ignore
-		if (ethernetType == EtherTypes.LLDP.shortValue() || ethernetType < 0)
-			return PacketResult.IGNORED;
-
-		// Decode the RawPacket
-		Packet packet = this.dataPacketService.decodeDataPacket(inPkt);
+		if (ethernetType == Ethernet.TYPE_LLDP || ethernetType < 0)
+			return false;
 
 		// Convert the node from which the packet came into a RF DataPath
-		DP from = new DP(Long.valueOf(in.getNode().getID().toString()).longValue() , 
-						Integer.parseInt(in.getID().toString()));
+		DP from = new DP(Long.valueOf(in.deviceId().toString()).longValue() ,
+						Integer.parseInt(in.port().toString()));
 
 		if(ethernetType == defs.RF_ETH_PROTO){ // Received Mapping packet
 			//process packet
-			byte[] data = inPkt.getPacketData();
+			byte[] data = inPkt.unparsed().array();
 			byte[] buf = new byte[8];
 
 			buf[0] = data[14];
@@ -352,7 +347,7 @@ public class RFProxy {
 		}
 
 		// If an action is correctly executed, don't consume the packet
-		return PacketResult.IGNORED;
+		return false;
 	}
 
 
@@ -366,10 +361,16 @@ public class RFProxy {
      */
 	public void start() {
 		this.logger.info("Activating RFProxy");
+
+		boolean bind = true;
+
+		if (this.consumer_id.isEmpty()) {
+			bind = false;
+		}
 		
 		// Create IPC
  		this.ipc = new JeroMQIPCMessageService(
-			this.address, this.database_name, this.consumer_id, this.logger);
+			this.address, this.database_name, bind, this.logger);
 
 		// Initialize Message Factory
  		this.factory = new RFProtocolFactory();
